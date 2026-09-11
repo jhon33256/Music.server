@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, render_template_string
 import os
 
 app = Flask(__name__)
@@ -8,12 +8,13 @@ HTML = """
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Music Server</title>
+    <title>YouTube Music Server</title>
+
     <style>
         body {
             font-family: Arial;
-            max-width: 500px;
-            margin: 40px auto;
+            max-width: 600px;
+            margin: 30px auto;
             padding: 20px;
             text-align: center;
         }
@@ -21,7 +22,7 @@ HTML = """
         input {
             width: 90%;
             padding: 12px;
-            margin: 8px;
+            margin: 10px;
             box-sizing: border-box;
         }
 
@@ -33,95 +34,177 @@ HTML = """
             cursor: pointer;
         }
 
+        #player {
+            margin-top: 20px;
+        }
+
         #status {
             margin: 20px;
             font-weight: bold;
-        }
-
-        audio {
-            width: 100%;
-            margin-top: 20px;
         }
     </style>
 </head>
 
 <body>
 
-<h1>🎵 Music Server</h1>
+<h1>🎵 YouTube Music Server</h1>
 
-<input id="url" type="url"
-       placeholder="Direct MP3/audio URL">
+<input
+    id="url"
+    type="text"
+    placeholder="Paste YouTube link here"
+>
 
 <br>
 
-<button onclick="loadSong()">🎵 Load</button>
+<button onclick="loadYouTube()">🎵 Load</button>
 <button onclick="playSong()">▶️ Play</button>
 <button onclick="pauseSong()">⏸️ Pause</button>
 <button onclick="stopSong()">⏹️ Stop</button>
 
-<br><br>
-
-<label>🔊 Volume</label>
-<input id="volume"
-       type="range"
-       min="0"
-       max="1"
-       step="0.01"
-       value="1"
-       oninput="changeVolume(this.value)">
-
-<audio id="player" controls></audio>
+<div id="player"></div>
 
 <div id="status">Ready</div>
 
+<script src="https://www.youtube.com/iframe_api"></script>
+
 <script>
 
-const player = document.getElementById("player");
-const statusBox = document.getElementById("status");
+let player = null;
+let pendingVideoId = null;
 
-function loadSong() {
+function getVideoId(url) {
+
+    try {
+
+        const u = new URL(url);
+
+        if (u.hostname.includes("youtu.be")) {
+            return u.pathname.substring(1);
+        }
+
+        if (u.hostname.includes("youtube.com")) {
+
+            if (u.searchParams.get("v")) {
+                return u.searchParams.get("v");
+            }
+
+            const parts = u.pathname.split("/");
+
+            if (parts[1] === "shorts") {
+                return parts[2];
+            }
+
+            if (parts[1] === "embed") {
+                return parts[2];
+            }
+        }
+
+    } catch (e) {
+        return null;
+    }
+
+    return null;
+}
+
+
+function loadYouTube() {
 
     const url = document.getElementById("url").value.trim();
 
-    if (!url) {
-        statusBox.innerText = "Please enter an audio URL";
+    const videoId = getVideoId(url);
+
+    if (!videoId) {
+        document.getElementById("status").innerText =
+            "Invalid YouTube link ❌";
         return;
     }
 
-    player.src = url;
-    player.load();
+    pendingVideoId = videoId;
 
-    statusBox.innerText = "Song loaded 🎵";
+    if (player) {
+
+        player.loadVideoById(videoId);
+
+        document.getElementById("status").innerText =
+            "Loaded 🎵";
+
+    } else {
+
+        document.getElementById("status").innerText =
+            "YouTube player loading...";
+    }
 }
+
+
+function onYouTubeIframeAPIReady() {
+
+    player = new YT.Player("player", {
+
+        height: "315",
+        width: "100%",
+
+        videoId: pendingVideoId || "",
+
+        playerVars: {
+            playsinline: 1
+        },
+
+        events: {
+
+            onReady: function() {
+
+                document.getElementById("status").innerText =
+                    "Player ready 🎵";
+
+                if (pendingVideoId) {
+                    player.loadVideoById(pendingVideoId);
+                }
+            },
+
+            onStateChange: function(event) {
+
+                if (event.data === YT.PlayerState.PLAYING) {
+                    document.getElementById("status").innerText =
+                        "Playing ▶️";
+                }
+
+                if (event.data === YT.PlayerState.PAUSED) {
+                    document.getElementById("status").innerText =
+                        "Paused ⏸️";
+                }
+
+                if (event.data === YT.PlayerState.ENDED) {
+                    document.getElementById("status").innerText =
+                        "Finished ✅";
+                }
+            }
+        }
+    });
+}
+
 
 function playSong() {
 
-    player.play()
-        .then(() => {
-            statusBox.innerText = "Playing 🎵";
-        })
-        .catch((error) => {
-            statusBox.innerText = "Cannot play: " + error.message;
-        });
+    if (player) {
+        player.playVideo();
+    }
 }
+
 
 function pauseSong() {
 
-    player.pause();
-    statusBox.innerText = "Paused ⏸️";
+    if (player) {
+        player.pauseVideo();
+    }
 }
+
 
 function stopSong() {
 
-    player.pause();
-    player.currentTime = 0;
-
-    statusBox.innerText = "Stopped ⏹️";
-}
-
-function changeVolume(value) {
-
-    player.volume = value;
+    if (player) {
+        player.stopVideo();
+    }
 }
 
 </script>
@@ -138,24 +221,14 @@ def home():
 
 @app.route("/health")
 def health():
-    return jsonify({
-        "status": "OK",
-        "service": "Music Server"
-    })
-
-
-@app.route("/status")
-def status():
-    return jsonify({
-        "running": True,
-        "message": "Music server is running"
-    })
+    return "OK"
 
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 10000))
 
     app.run(
         host="0.0.0.0",
         port=port
-    )
+                             )
